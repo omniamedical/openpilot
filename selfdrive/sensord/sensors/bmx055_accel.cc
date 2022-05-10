@@ -30,7 +30,7 @@ int BMX055_Accel::init() {
     goto fail;
   }
 
-  if (gpio_set_edge(gpio_nr, EDGE_TYPES::rising) != 0) {
+  if (gpio_set_edge(gpio_nr, Edgetypes::Rising) != 0) {
     ret = -1;
     goto fail;
   }
