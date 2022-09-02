@@ -35,6 +35,7 @@ class DRIVER_MONITOR_SETTINGS():
     self._EE_THRESH12 = 3.25
     self._EE_THRESH21 = 0.01
     self._EE_THRESH22 = 0.35
+    self._EEP_THRESH = 0.5
 
     self._POSE_PITCH_THRESHOLD = 0.3133
     self._POSE_PITCH_THRESHOLD_SLACK = 0.3237
@@ -127,6 +128,7 @@ class DriverStatus():
     self.blink = DriverBlink()
     self.eev1 = 0.
     self.eev2 = 1.
+    self.eep = 0.
     self.ee1_offseter = RunningStatFilter(max_trackable=self.settings._POSE_OFFSET_MAX_COUNT)
     self.ee2_offseter = RunningStatFilter(max_trackable=self.settings._POSE_OFFSET_MAX_COUNT)
     self.ee1_calibrated = False
@@ -203,15 +205,15 @@ class DriverStatus():
     if (self.blink.left_blink + self.blink.right_blink)*0.5 > self.settings._BLINK_THRESHOLD:
       distracted_types.append(DistractedType.DISTRACTED_BLINK)
 
-    if self.ee1_calibrated:
-      ee1_dist = self.eev1 > self.ee1_offseter.filtered_stat.M * self.settings._EE_THRESH12
-    else:
-      ee1_dist = self.eev1 > self.settings._EE_THRESH11
-    if self.ee2_calibrated:
-      ee2_dist = self.eev2 < self.ee2_offseter.filtered_stat.M * self.settings._EE_THRESH22
-    else:
-      ee2_dist = self.eev2 < self.settings._EE_THRESH21
-    if ee1_dist or ee2_dist:
+    # if self.ee1_calibrated:
+    #   ee1_dist = self.eev1 > self.ee1_offseter.filtered_stat.M * self.settings._EE_THRESH12
+    # else:
+    #   ee1_dist = self.eev1 > self.settings._EE_THRESH11
+    # if self.ee2_calibrated:
+    #   ee2_dist = self.eev2 < self.ee2_offseter.filtered_stat.M * self.settings._EE_THRESH22
+    # else:
+    #   ee2_dist = self.eev2 < self.settings._EE_THRESH21
+    if self.eep > self.settings._EEP_THRESH:
       distracted_types.append(DistractedType.DISTRACTED_E2E)
 
     return distracted_types
@@ -259,10 +261,10 @@ class DriverStatus():
     self.blink.right_blink = driver_data.rightBlinkProb * (driver_data.rightEyeProb > self.settings._EYE_THRESHOLD) * (driver_data.sunglassesProb < self.settings._SG_THRESHOLD)
     self.eev1 = driver_data.notReadyProb[1]
     self.eev2 = driver_data.readyProb[0]
+    self.eep = driver_data.phoneProb
 
     self.distracted_types = self._get_distracted_types()
-    self.driver_distracted = (DistractedType.DISTRACTED_POSE in self.distracted_types or
-                                            DistractedType.DISTRACTED_BLINK in self.distracted_types) and \
+    self.driver_distracted = (DistractedType.DISTRACTED_E2E in self.distracted_types) and \
                                           driver_data.faceProb > self.settings._FACE_THRESHOLD and self.pose.low_std
     self.driver_distraction_filter.update(self.driver_distracted)
 
