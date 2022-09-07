@@ -90,20 +90,24 @@ def replay_device_state(s, msgs):
       rk.keep_time()
 
 
-def replay_sensor_events(s, msgs):
-  pm = messaging.PubMaster([s, ])
-  rk = Ratekeeper(service_list[s].frequency, print_delay_threshold=None)
-  smsgs = [m for m in msgs if m.which() == s]
+def replay_sensor_events(slist, msgs):
+  pm = messaging.PubMaster(slist)
+
+  rks = {}
+  for s in slist:
+    rks[s] = Ratekeeper(service_list[s].frequency, print_delay_threshold=None)
+
   while True:
-    for m in smsgs:
+    for m in msgs:
+      if m.which() not in slist:
+        continue
+
       new_m = m.as_builder()
       new_m.logMonoTime = int(sec_since_boot() * 1e9)
+      new_m.timestamp = new_m.logMonoTime
 
-      for evt in new_m.sensorEvents:
-        evt.timestamp = new_m.logMonoTime
-
-      pm.send(s, new_m)
-      rk.keep_time()
+      pm.send(m.which(), new_m)
+      rks[m.which()].keep_time()
 
 
 def replay_service(s, msgs):
@@ -212,7 +216,9 @@ def regen_segment(lr, frs=None, outdir=FAKEDATA, disable_tqdm=False):
   vs, cam_procs = replay_cameras(lr, frs, disable_tqdm=disable_tqdm)
   fake_daemons = {
     'sensord': [
-      multiprocessing.Process(target=replay_sensor_events, args=('sensorEvents', lr)),
+      multiprocessing.Process(target=replay_sensor_events, args=(
+        ['accelerometer', 'gyroscope', 'magnetometer', 'lightSensor', 'temperatureSensor'],
+        lr)),
     ],
     'pandad': [
       multiprocessing.Process(target=replay_service, args=('can', lr)),
