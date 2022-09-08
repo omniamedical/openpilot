@@ -80,7 +80,6 @@ ALL_SENSORS = {
   }
 }
 
-<<<<<<< HEAD
 SENSOR_BUS = 1
 I2C_ADDR_LSM = 0x6A
 LSM_INT_GPIO = 84
