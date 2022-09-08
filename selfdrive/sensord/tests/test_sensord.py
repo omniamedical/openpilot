@@ -80,6 +80,7 @@ ALL_SENSORS = {
   }
 }
 
+<<<<<<< HEAD
 SENSOR_BUS = 1
 I2C_ADDR_LSM = 0x6A
 LSM_INT_GPIO = 84
@@ -107,6 +108,24 @@ def get_proc_interrupts(int_pin):
 
   return ""
 
+def read_sensor_events(sensor_types, duration_sec):
+
+  esocks = {}
+  events = {}
+  for stype in sensor_types:
+    esocks[stype] = messaging.sub_sock(stype, timeout=0.1)
+    events[stype] = []
+
+  start_time_sec = time.monotonic()
+  while time.monotonic() - start_time_sec < duration_sec:
+    for esock in esocks:
+      events[esock] += messaging.drain_sock(esocks[esock])
+    time.sleep(0.01)
+
+  for etype in events:
+    assert len(events[etype]) != 0, f"No {etype} events collected"
+
+  return events
 
 def get_filter_bounds(values, percent):
   values.sort()
@@ -183,14 +202,10 @@ class TestSensord(unittest.TestCase):
     for event in  self.events:
       for measurement in event.sensorEvents:
 
-        # filter unset events (bmx magn)
-        if measurement.version == 0:
-          continue
-
-        if measurement.type in sensor_events:
-          sensor_events[measurement.type] += 1
+        if measurement.sensorEvent.type in sensor_events:
+          sensor_events[measurement.sensorEvent.type] += 1
         else:
-          sensor_events[measurement.type] = 1
+          sensor_events[measurement.sensorEvent.type] = 1
 
     for s in sensor_events:
       err_msg = f"Sensor {s}: 200 < {sensor_events[s]}"
@@ -229,18 +244,15 @@ class TestSensord(unittest.TestCase):
   @with_processes(['sensord'])
   def test_sensor_values_sanity_check(self):
 
-    events = read_sensor_events(2)
+    events = read_sensor_events(['accelerometer', 'gyroscope', 'magnetometer',
+                                 'lightSensor', 'temperatureSensor'], 2)
 
     sensor_values = dict()
-    for event in events:
-      for m in event.sensorEvents:
+    for etype in events:
+      for m in events[etype]:
+        key = (m.sensorEvent.source.raw, m.sensorEvent.which())
+        values = getattr(m.sensorEvent, m.sensorEvent.which())
 
-        # filter unset events (bmx magn)
-        if m.version == 0:
-          continue
-
-        key = (m.source.raw, m.which())
-        values = getattr(m, m.which())
         if hasattr(values, 'v'):
           values = values.v
         values = np.atleast_1d(values)
