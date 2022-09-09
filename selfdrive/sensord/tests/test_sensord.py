@@ -12,8 +12,6 @@ from system.hardware import TICI, HARDWARE
 from selfdrive.test.helpers import with_processes
 from selfdrive.manager.process_config import managed_processes
 
-TEST_TIMESPAN = 10
-
 SENSOR_CONFIGURATIONS = (
   {
     ('bmx055', 'acceleration'),
