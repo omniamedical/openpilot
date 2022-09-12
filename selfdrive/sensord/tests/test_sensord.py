@@ -108,7 +108,6 @@ def get_proc_interrupts(int_pin):
   return ""
 
 def read_sensor_events(sensor_types, duration_sec):
-
   esocks = {}
   events = {}
   for stype in sensor_types:
@@ -204,7 +203,7 @@ class TestSensord(unittest.TestCase):
         if measurement.sensorEvent.type in sensor_events:
           sensor_events[measurement.sensorEvent.type] += 1
         else:
-          sensor_events[measurement.sensorEvent.type] = 1
+          sensor_events[m.type] = 1
 
     for s in sensor_events:
       err_msg = f"Sensor {s}: 200 < {sensor_events[s]}"
@@ -249,8 +248,9 @@ class TestSensord(unittest.TestCase):
     sensor_values = dict()
     for etype in events:
       for m in events[etype]:
-        key = (m.sensorEvent.source.raw, m.sensorEvent.which())
-        values = getattr(m.sensorEvent, m.sensorEvent.which())
+        event = getattr(m, m.which())
+        key = (event.source.raw, event.which())
+        values = getattr(event, event.which())
 
         if hasattr(values, 'v'):
           values = values.v
