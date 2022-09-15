@@ -163,7 +163,7 @@ int sensor_loop() {
 
     for (int i = 0; i < sensors.size(); i++) {
       MessageBuilder msg;
-      std::service;
+      std::string service;
       if (sensors[i]->get_event(msg, service)) {
         send_message(pm, msg, service);
       }
