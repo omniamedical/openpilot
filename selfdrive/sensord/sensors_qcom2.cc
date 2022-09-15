@@ -172,7 +172,6 @@ int sensor_loop() {
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     std::this_thread::sleep_for(std::chrono::milliseconds(10) - (end - begin));
   }
-
   lsm_interrupt_thread.join();
 
   for (auto sensor : sensors) {
