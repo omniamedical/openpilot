@@ -110,7 +110,7 @@ UpdateAlert::UpdateAlert(QWidget *parent) : AbstractAlert(true, parent) {
 }
 
 bool UpdateAlert::refresh() {
-  bool updateAvailable = params.getBool("UpdateAvailable");
+  bool updateAvailable = false;
   if (updateAvailable) {
     releaseNotes->setText(params.get("ReleaseNotes").c_str());
   }
