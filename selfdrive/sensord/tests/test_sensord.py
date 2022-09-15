@@ -85,17 +85,6 @@ I2C_ADDR_LSM = 0x6A
 LSM_INT_GPIO = 84
 
 
-def read_sensor_events(duration_sec):
-  sensor_events = messaging.sub_sock("sensorEvents", timeout=0.1)
-  start_time_sec = time.monotonic()
-  events = []
-  while time.monotonic() - start_time_sec < duration_sec:
-    events += messaging.drain_sock(sensor_events)
-    time.sleep(0.01)
-
-  assert len(events) != 0, "No sensor events collected"
-  return events
-
 def get_proc_interrupts(int_pin):
 
   with open("/proc/interrupts") as f:
@@ -125,12 +114,18 @@ def read_sensor_events(sensor_types, duration_sec):
 
   return events
 
-def get_filter_bounds(values, percent):
-  values.sort()
-  median = int(len(values)/2)
-  lb = median - int(len(values)*percent/2)
-  ub = median + int(len(values)*percent/2)
-  return (lb, ub)
+def verify_100Hz_rate(type_name, data_list):
+  data_list.sort()
+  tdiffs = np.diff(data_list)
+
+  high_delay_diffs = set(filter(lambda d: d >= 10.1*10**6, tdiffs))
+  assert len(high_delay_diffs) < 10, f"Too many high delay packages: {high_delay_diffs} ({type_name})"
+
+  avg_diff = sum(tdiffs)/len(tdiffs)
+  assert avg_diff > 9.6*10**6, f"avg difference {avg_diff}, below threshold ({type_name})"
+
+  stddev = np.std(tdiffs)
+  assert stddev < 1.5*10**6, f"Standard-dev to big {stddev} ({type_name})"
 
 
 class TestSensord(unittest.TestCase):
@@ -144,7 +139,8 @@ class TestSensord(unittest.TestCase):
 
     # read initial sensor values every test case can use
     managed_processes["sensord"].start()
-    cls.events = read_sensor_events(5)
+    cls.events = read_sensor_events(['accelerometer', 'gyroscope', 'magnetometer',
+                                     'lightSensor', 'temperatureSensor'], 5)
     managed_processes["sensord"].stop()
 
   def tearDown(self):
@@ -155,53 +151,47 @@ class TestSensord(unittest.TestCase):
     # verify correct sensors configuration
 
     seen = set()
-    for event in self.events:
-      for measurement in event.sensorEvents:
-        # filter unset events (bmx magn)
-        if measurement.version == 0:
-          continue
-        seen.add((str(measurement.source), measurement.which()))
+    for etype in self.events:
+      for measurement in self.events[etype]:
+        m = getattr(measurement, measurement.which())
+        seen.add((str(m.source), m.which()))
 
     self.assertIn(seen, SENSOR_CONFIGURATIONS)
 
   def test_lsm6ds3_100Hz(self):
     # verify measurements are sampled and published at a 100Hz rate
 
-    data_points = set()
-    for event in self.events:
-      for measurement in event.sensorEvents:
+    accel_data = set()
+    gyro_data = set()
+    for measurement in self.events['accelerometer'] + self.events['gyroscope']:
+      m = getattr(measurement, measurement.which())
 
-        # skip lsm6ds3 temperature measurements
-        if measurement.which() == 'temperature':
-          continue
+      # filter bmx events
+      if not str(m.source).startswith("lsm6ds3"):
+        continue
 
-        if str(measurement.source).startswith("lsm6ds3"):
-          data_points.add(measurement.timestamp)
+      if measurement.which() == 'accelerometer':
+        accel_data.add(m.timestamp)
+      else:
+        gyro_data.add(m.timestamp)
 
-    assert len(data_points) != 0, "No lsm6ds3 sensor events"
+    assert len(accel_data) != 0, "No lsm6ds3 accelerometer sensor events"
+    assert len(gyro_data) != 0, "No lsm6ds3 gyroscope sensor events"
 
-    data_list = list(data_points)
-    data_list.sort()
-    tdiffs = np.diff(data_list)
+    verify_100Hz_rate("accelerometer", list(accel_data))
+    verify_100Hz_rate("gyroscope", list(gyro_data))
 
-    high_delay_diffs = set(filter(lambda d: d >= 10.1*10**6, tdiffs))
-    assert len(high_delay_diffs) < 10, f"Too many high delay packages: {high_delay_diffs}"
-
-    avg_diff = sum(tdiffs)/len(tdiffs)
-    assert avg_diff > 9.6*10**6, f"avg difference {avg_diff}, below threshold"
-
-    stddev = np.std(tdiffs)
-    assert stddev < 1.5*10**6, f"Standard-dev to big {stddev}"
 
   def test_events_check(self):
     # verify if all sensors produce events
 
     sensor_events = dict()
-    for event in  self.events:
-      for measurement in event.sensorEvents:
+    for etype in self.events:
+      for measurement in self.events[etype]:
+        m = getattr(measurement, measurement.which())
 
-        if measurement.sensorEvent.type in sensor_events:
-          sensor_events[measurement.sensorEvent.type] += 1
+        if m.type in sensor_events:
+          sensor_events[m.type] += 1
         else:
           sensor_events[m.type] = 1
 
@@ -213,22 +203,19 @@ class TestSensord(unittest.TestCase):
     # ensure diff between the message logMonotime and sample timestamp is small
 
     tdiffs = list()
-    for event in self.events:
-      for measurement in event.sensorEvents:
-
-        # filter unset events (bmx magn)
-        if measurement.version == 0:
-          continue
+    for etype in self.events:
+      for measurement in self.events[etype]:
+        m = getattr(measurement, measurement.which())
 
         # check if gyro and accel timestamps are before logMonoTime
-        if str(measurement.source).startswith("lsm6ds3"):
-          if measurement.which() != 'temperature':
-            err_msg = f"Timestamp after logMonoTime: {measurement.timestamp} > {event.logMonoTime}"
-            assert measurement.timestamp < event.logMonoTime, err_msg
+        if str(m.source).startswith("lsm6ds3"):
+          if m.which() != 'temperature':
+            err_msg = f"Timestamp after logMonoTime: {m.timestamp} > {measurement.logMonoTime}"
+            assert m.timestamp < measurement.logMonoTime, err_msg
 
         # negative values might occur, as non interrupt packages created
         # before the sensor is read
-        tdiffs.append(abs(event.logMonoTime - measurement.timestamp))
+        tdiffs.append(abs(measurement.logMonoTime - m.timestamp))
 
     high_delay_diffs = set(filter(lambda d: d >= 10*10**6, tdiffs))
     assert len(high_delay_diffs) < 15, f"Too many high delay packages: {high_delay_diffs}"
@@ -308,55 +295,5 @@ class TestSensord(unittest.TestCase):
     assert state_one == state_two, "Interrupts received after sensord stop!"
 
 
-
-  @with_processes(['sensord'])
-  def test_events_check(self):
-    # verify if all sensors produce events
-    events = read_sensor_events(3)
-
-    sensor_events = dict()
-    for event in events:
-      for measurement in event.sensorEvents:
-        # Filter out unset events
-        if measurement.version == 0:
-          continue
-
-        if measurement.type in sensor_events:
-          sensor_events[measurement.type] += 1
-        else:
-          sensor_events[measurement.type] = 1
-
-    for s in sensor_events:
-      assert sensor_events[s] > 200, f"Sensor {s}: {sensor_events[s]} < 200 events"
-
-  @with_processes(['sensord'])
-  def test_logmonottime_timestamp(self):
-    # ensure diff logMonotime and timestamp is rather small
-    # -> published when created
-    events = read_sensor_events(3)
-
-    tdiffs = list()
-    for event in events:
-      for measurement in event.sensorEvents:
-        # Filter out unset events
-        if measurement.version == 0:
-          continue
-
-        tdiffs.append(abs(event.logMonoTime - measurement.timestamp))
-        # negative values might occur, as non interrupt packages created
-        # before the sensor is read
-
-    assert len(tdiffs) != 0, "No sensor data collected"
-
-    # filter 10% of the data to remove outliers
-    lb, ub = get_filter_bounds(tdiffs, 0.9)
-    diffs = tdiffs[lb:ub]
-    avg_diff = round(sum(diffs)/len(diffs), 4)
-
-    assert max(diffs) < 10*10**6, f"packet took { max(diffs):.1f}ns for publishing"
-    assert avg_diff < 4*10**6, f"Avg packet diff: {avg_diff:.1f}ns"
-
-
 if __name__ == "__main__":
   unittest.main()
-
