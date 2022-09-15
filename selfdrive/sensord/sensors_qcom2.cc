@@ -6,9 +6,6 @@
 #include <poll.h>
 #include <linux/gpio.h>
 
-// TODO: check if really needed
-#include <poll.h>
-
 #include "cereal/messaging/messaging.h"
 #include "common/i2c.h"
 #include "common/swaglog.h"
@@ -32,10 +29,8 @@ ExitHandler do_exit;
 std::mutex pm_mutex;
 
 void send_message(PubMaster& pm, MessageBuilder& msg, std::string &service) {
-  {
-    std::lock_guard<std::mutex> lock(pm_mutex);
-    pm.send(service.c_str(), msg);
-  }
+  std::lock_guard<std::mutex> lock(pm_mutex);
+  pm.send(service.c_str(), msg);
 }
 
 void interrupt_loop(int fd, std::vector<Sensor *>& sensors, PubMaster& pm) {
@@ -75,31 +70,10 @@ void interrupt_loop(int fd, std::vector<Sensor *>& sensors, PubMaster& pm) {
 
     for (Sensor *sensor : sensors) {
       MessageBuilder msg;
-      auto sensor_event = msg.initEvent().initSensorEvent();
-      if (!sensor->get_event(sensor_event)) {
-        continue;
+      std::string service;
+      if (sensor->get_event(msg, service, ts)) {
+        send_message(pm, msg, service);
       }
-
-      event.setTimestamp(ts);
-      collected_events.push_back(kj::mv(orphan));
-    }
-
-    if (collected_events.size() == 0) {
-      continue;
-    }
-
-    if (collected_events.size() == 0) {
-      continue;
-    }
-
-    auto events = msg.initEvent().initSensorEvents(collected_events.size());
-    for (int i = 0; i < collected_events.size(); ++i) {
-      events.adoptWithCaveats(i, kj::mv(collected_events[i]));
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(pm_mutex);
-      pm.send("sensorEvents", msg);
     }
   }
 
@@ -187,22 +161,12 @@ int sensor_loop() {
   while (!do_exit) {
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
 
-  // polling loop for non interrupt handled sensors
-  while (!do_exit) {
-    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-
-    const int num_events = sensors.size();
-    MessageBuilder msg;
-    auto sensor_events = msg.initEvent().initSensorEvents(num_events);
-
-    for (int i = 0; i < num_events; i++) {
-      auto event = sensor_events[i];
-      sensors[i]->get_event(event);
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(pm_mutex);
-      pm.send("sensorEvents", msg);
+    for (int i = 0; i < sensors.size(); i++) {
+      MessageBuilder msg;
+      std::service;
+      if (sensors[i]->get_event(msg, service)) {
+        send_message(pm, msg, service);
+      }
     }
 
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
@@ -210,6 +174,11 @@ int sensor_loop() {
   }
 
   lsm_interrupt_thread.join();
+
+  for (auto sensor : sensors) {
+    sensor->shutdown();
+  }
+
   delete i2c_bus_imu;
   return 0;
 }
